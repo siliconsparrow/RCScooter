@@ -27,8 +27,12 @@
     // Channel 2 will control the H-Bridge speed and direction
     // Channel 3 is reserved for future use
 
+// Define this to print debug info to the UART at 9600bps.
+//#define UART_OUTPUT
+
 #define RC_MIN            60 // Remote control channel typical minimum value.
 #define RC_MAX           185 // Remote control channel typical maximum value.
+#define RC_CENTRE        130 // Initial value - represents centre of control's travel.
 #define RC_CHAN_STEERING   0
 #define RC_CHAN_THROTTLE   1
 #define RC_CHAN_SPARE      2
@@ -54,12 +58,16 @@ void main(void)
     systickInit();        // Set up timer.
     adcInit();
     ledInit();            // Set up flashy light.
-	serialInit(BAUD9600); // Set up serial port.
     pwmInit();            // Set up PWM for traction motor control.
     pwmSenseInit();       // Set up PWM receiver for the R/C input.
     motorInit();          // Set up H-bridge motor controller
 
-// TODO: Current sense for steering motor.
+#ifdef UART_OUTPUT
+	serialInit(BAUD9600); // Set up serial port.
+#endif
+
+    // Enable watchdog timer (timeout is set in the config flags in board.c)
+    WDTCONbits.SWDTEN = 1;
     
 	// Interrupts are used for the serial port, system timer and to
 	// detect over-current on the motors.
@@ -71,13 +79,13 @@ void main(void)
     motorSetDriveSpeed(MOTOR_MAX_SPEED);
     
     // Main loop
-    
     while(1) {
         ClrWdt();
         
         // Handles acceleration and direction of steering motor.
         //motorTick();
 
+#ifdef UART_OUTPUT
         // Print status to the UART        
         for(uint8_t i = 0; i < PWM_SENSE_CHANNELS; i++) {
             sprintf(buf, " CH%d=%d", i, pwmSenseGet(i));
@@ -88,7 +96,8 @@ void main(void)
         sprintf(buf, " I=%d", steerCurrent);
         serialSendString(buf);
         serialSendString("\r\n");
-        
+#endif
+                
         // Remote control channel 0 is the steering.
         steer = pwmSenseGet(RC_CHAN_STEERING);
         if(steer >= RC_MIN) {
@@ -109,6 +118,10 @@ void main(void)
         
         // Remote control channel 1 is the throttle.
         throttle = pwmSenseGet(RC_CHAN_THROTTLE);
+        if(throttle == 0) {
+            throttle = RC_CENTRE;
+        }
+        
         if(throttle >= RC_MIN) {
             throttle -= RC_MIN;
             throttle *= PWM_MAX;
@@ -116,9 +129,9 @@ void main(void)
             if(throttle > PWM_MAX) {
                 throttle = PWM_MAX;
             }
+            pwm1SetDuty(throttle);
         }
-        pwm1SetDuty(throttle);
-
+    
         // Remote control channel 2 is a single button. No idea what to do
         // with it yet.
         if(pwmSenseGet(RC_CHAN_SPARE) > 100) {
